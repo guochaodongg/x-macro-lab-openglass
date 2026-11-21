@@ -11,3 +11,10 @@ CONFIG_SPIRAM_SPEED_80M=y
 
 # Print console over the native USB port (USB-C connector on XIAO)
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Wi-Fi AP for the local runtime status web page
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+
+# Camera frame buffers in PSRAM (OV2640 JPEG stream)
+CONFIG_CAMERA_PSRAM_DMA=y
