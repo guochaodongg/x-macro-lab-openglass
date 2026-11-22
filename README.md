@@ -1,6 +1,6 @@
 # XIAO ESP32S3 BOOT 键开关机 + 摄像头网页预览 Demo（ESP-IDF v6.1）
 
-Seeed Studio XIAO ESP32S3 的 BOOT 键开关机 + 板载 LED 闪烁示例，使用本地 ESP-IDF v6.1 构建。开机后 LED 以 1Hz 闪烁；短按 BOOT 键进入深度睡眠（省电"关机"），再按一次 BOOT 键唤醒恢复运行。程序运行后会开启 Wi-Fi 热点，可通过浏览器访问设备 IP 查看运行状态、日志以及摄像头实时画面。
+Seeed Studio XIAO ESP32S3 的 BOOT 键开关机 + 板载 LED 闪烁示例，使用本地 ESP-IDF v6.1 构建。开机后 LED 以 1Hz 闪烁；短按 BOOT 键进入深度睡眠（省电"关机"），再按一次 BOOT 键唤醒恢复运行。首次使用可通过配网热点在浏览器中选择公共 Wi-Fi 或手机热点，凭据保存后断电重启会自动连接，并继续提供运行状态、日志和摄像头实时画面。
 
 ## 硬件说明
 
@@ -25,7 +25,9 @@ Seeed Studio XIAO ESP32S3 的 BOOT 键开关机 + 板载 LED 闪烁示例，使�
 ├── main/
 │   ├── CMakeLists.txt
 │   ├── idf_component.yml   # esp32-camera 组件依赖声明
-│   └── main.c              # LED/BOOT 开关机 + Wi-Fi 网页状态与摄像头预览
+│   ├── main.c              # LED/BOOT 开关机 + Wi-Fi 配网/网页状态/摄像头预览
+│   ├── dns_server.h        # 强制门户 DNS 服务声明
+│   └── dns_server.c        # 强制门户 DNS 服务（所有域名解析到 192.168.4.1）
 ├── dependencies.lock       # 组件管理器生成的依赖锁文件
 ├── managed_components/     # 组件管理器下载的 esp32-camera 等组件
 ├── build.ps1               # 本机 ESP-IDF 环境辅助脚本（编译/烧录/监视）
@@ -76,28 +78,52 @@ idf.py build
 idf.py -p COM3 flash monitor
 ```
 
-## 网页查看运行状态与摄像头画面
+## 网页配网、运行状态与摄像头画面
 
-程序启动后会创建一个 Wi-Fi 热点并启动本地网页服务：
+设备采用“先配网、后自动连接”的方式，配网流程参考小智固件（`78/esp-wifi-connect`）的方案，加入**强制门户（Captive Portal）**、**先验证后保存**和**独立配网页面**：
+
+1. 首次使用且 NVS 中没有保存热点时，设备会自动写入默认热点 `pura80` / `88888888` 并尝试连接
+2. 配网热点 `OpenGlass-Status` 始终开启作为保底配置入口；若默认热点不可用或需要连接其他热点，可连接该热点
+3. 连接配网热点后，**大多数设备会自动弹出配网页面**；如果没有自动弹出，浏览器手动打开 `http://192.168.4.1/provision`
+   - 原理：设备内置 DNS 服务会把所有域名解析到 `192.168.4.1`，并把系统的联网探测请求（iOS/Android/Windows）302 跳转到配网页面
+4. 配网页面：扫描热点、输入密码、连接并保存；此时不显示摄像头和状态日志
+5. 设备会先尝试连接目标热点，**验证成功（拿到 IP）后才会把凭据保存到 NVS**；验证失败会提示原因且不覆盖已保存的凭据
+   - 为应对 APSTA 模式下信道切换导致的首次关联失败，会自动重试 2 次（间隔 3 秒）
+6. 配网成功后，页面自动跳转到功能页 `/app`
+7. 已配置设备再次上电时，`/` 直接进入功能页；需要重新配网可访问 `/provision` 或点击功能页上的“重新配网”
+8. 断电再上电后设备会自动连接已保存热点，并在功能页状态区显示路由器/手机热点分配的局域网 IP；断线后会自动重连
+
+配网热点与页面：
 
 | 项目 | 值 |
 |---|---|
 | Wi-Fi 名称（SSID） | `OpenGlass-Status` |
 | Wi-Fi 密码 | `openglass123` |
-| 浏览器地址 | `http://192.168.4.1/` |
+| 配网页面 | `http://192.168.4.1/`（未配置时）或 `http://<设备IP>/provision` |
+| 功能页面 | `http://<设备IP>/app` |
+| 强制门户 | DNS 劫持 + 联网探测 302 跳转（自动弹页） |
 
-使用方法：
+连接成功后，配网热点仍然保留，方便随时重新配置；功能页同时可通过两个地址访问：
 
-1. 用电脑或手机连接热点 `OpenGlass-Status`
-2. 打开浏览器访问 `http://192.168.4.1/`
-3. 首页会直接显示摄像头实时画面，并在下方每秒刷新运行状态和最近日志
+- `http://192.168.4.1/app`：配网热点地址（始终可用）
+- `http://<状态页显示的局域网 IP>/app`：已连接热点分配的 IP
+
+功能页内容：
+
+- 摄像头实时预览（81 端口 MJPEG 流）和单帧抓拍入口
+- 每秒刷新的运行状态（含“配网状态/配网信息”）和最近日志
+- “重新配网”链接，跳转到 `/provision`
 
 也可以直接访问：
 
-- `http://192.168.4.1/stream`：MJPEG 实时视频流（可直接在浏览器打开）
-- `http://192.168.4.1/snapshot`：抓取一帧 JPEG 图片
-- `http://192.168.4.1/api/status`：纯文本状态信息
-- `http://192.168.4.1/api/logs`：最近的运行日志
+- `http://192.168.4.1/api/wifi/scan`：扫描附近热点（JSON）
+- `http://<设备IP>:81/stream`：MJPEG 实时视频流（独立服务，不阻塞配网页面）
+- `http://<设备IP>/stream`：80 端口兼容地址，返回单帧 JPEG
+- `http://<设备IP>/snapshot`：抓取一帧 JPEG 图片
+- `http://<设备IP>/api/status`：纯文本状态信息，含 STA IP
+- `http://<设备IP>/api/logs`：最近的运行日志
+
+> Wi-Fi 凭据以明文形式保存在 ESP32 的 NVS 中，仅适合本地/IoT 演示用途。视频流使用独立 81 端口，`sdkconfig.defaults` 已将 `CONFIG_LWIP_MAX_SOCKETS` 提高到 20，避免 socket 耗尽导致 `accept (23)`。
 
 摄像头默认配置：
 
@@ -111,7 +137,7 @@ idf.py -p COM3 flash monitor
 | SCCB | SDA=GPIO40，SCL=GPIO39 |
 | DVP | D0~D7=GPIO15/17/18/16/14/12/11/48，VSYNC=GPIO38，HREF=GPIO47，PCLK=GPIO13，XCLK=GPIO10 |
 
-> Wi-Fi 名称、密码、端口和摄像头参数在 `main/main.c` 顶部宏中修改。按 BOOT 进入深度睡眠后，Wi-Fi、网页和摄像头都会停止，唤醒后自动恢复。
+> 默认连接的热点在 `main/main.c` 的 `DEFAULT_WIFI_SSID` / `DEFAULT_WIFI_PASSWORD` 宏中修改，仅在 NVS 未保存热点时写入一次；之后可通过 `/provision` 网页覆盖。配网热点名称/密码、HTTP 端口和摄像头参数也在文件顶部宏中。按 BOOT 进入深度睡眠后，Wi-Fi、网页和摄像头都会停止，唤醒后自动恢复。
 
 ## BOOT 键开关机说明
 
