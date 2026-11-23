@@ -1,6 +1,6 @@
-# XIAO ESP32S3 BOOT 键开关机 + 摄像头网页预览 Demo（ESP-IDF v6.1）
+# XIAO ESP32S3 BOOT 键开关机 + 摄像头网页预览 + ST7789 LCD Demo（ESP-IDF v6.1）
 
-Seeed Studio XIAO ESP32S3 的 BOOT 键开关机 + 板载 LED 闪烁示例，使用本地 ESP-IDF v6.1 构建。开机后 LED 以 1Hz 闪烁；短按 BOOT 键进入深度睡眠（省电"关机"），再按一次 BOOT 键唤醒恢复运行。首次使用可通过配网热点在浏览器中选择公共 Wi-Fi 或手机热点，凭据保存后断电重启会自动连接，并继续提供运行状态、日志和摄像头实时画面。
+Seeed Studio XIAO ESP32S3 的 BOOT 键开关机 + 板载 LED 闪烁示例，使用本地 ESP-IDF v6.1 构建。开机后 LED 以 1Hz 闪烁；短按 BOOT 键进入深度睡眠（省电"关机"），再按一次 BOOT 键唤醒恢复运行。首次使用默认连接 `pura80` / `88888888`，也支持通过配网热点在浏览器中重新配置 Wi‑Fi。断电重启后自动连接并继续提供运行状态、日志、摄像头实时画面和 1.69 寸 ST7789 LCD 测试显示。
 
 ## 硬件说明
 
@@ -12,6 +12,24 @@ Seeed Studio XIAO ESP32S3 的 BOOT 键开关机 + 板载 LED 闪烁示例，使�
 | 用户 LED | **GPIO21，橙色，低电平点亮（active-low）** |
 | BOOT 键 | **GPIO0，低电平按下（active-low），RTC GPIO，可作深度睡眠唤醒源** |
 | 摄像头 | **OV2640（XIAO ESP32S3 Sense / OmiGlass 接口），JPEG 输出，VGA 640×480** |
+| LCD | **金逸晨 1.69 寸 TFT，ST7789V2，240×280，SPI，3.3V，10pin 带字库版本** |
+
+### 1.69 寸 ST7789 LCD 接线
+
+| LCD 引脚 | XIAO 引脚 | ESP32-S3 GPIO | 说明 |
+|---|---|---|---|
+| VCC | 3V3 | — | **必须 3.3V，不要接 5V** |
+| GND | GND | — | 地 |
+| SCL / CLK | D8 | GPIO7 | SPI 时钟 |
+| SDA / DIN / MOSI | D10 | GPIO9 | SPI 数据 |
+| CS | D6 | GPIO43 | 片选 |
+| DC / D/C | D7 | GPIO44 | 数据/命令选择 |
+| RES / RST | D0 | GPIO1 | 复位 |
+| BLK / LED | D1 | GPIO2 | 背光控制，高电平点亮 |
+
+> 10pin 带字库版本请按**丝印名称**接线，不要按物理顺序猜。多出来的字库引脚（常见标注 `F_CS` / `FONT_CS` / `CS1` / `NC` / 第二个 `GND`）只用于读取模块上的字库芯片，**不影响 ST7789 点亮和彩条显示**，当前驱动可以悬空不接。
+> 以上显示引脚避开了摄像头和板载 LED。若你的屏幕已硬连线到其他 GPIO，修改 `main/lcd_st7789.c` 顶部的 `LCD_PIN_*` 宏后重新编译。
+> 当前默认参数：SPI Mode 3、20 MHz、Y 偏移 20、颜色反转、BGR 顺序；上电后会显示提供的蜘蛛图片（已转换为 240×280 单色位图，灰底水印已过滤）。
 
 > `gpio_set_level(21, 0)` → LED 亮；`gpio_set_level(21, 1)` → LED 灭。
 > 这是 XIAO ESP32S3 的硬件设计，与常见开发板的高电平点亮相反。
@@ -27,7 +45,10 @@ Seeed Studio XIAO ESP32S3 的 BOOT 键开关机 + 板载 LED 闪烁示例，使�
 │   ├── idf_component.yml   # esp32-camera 组件依赖声明
 │   ├── main.c              # LED/BOOT 开关机 + Wi-Fi 配网/网页状态/摄像头预览
 │   ├── dns_server.h        # 强制门户 DNS 服务声明
-│   └── dns_server.c        # 强制门户 DNS 服务（所有域名解析到 192.168.4.1）
+│   ├── dns_server.c        # 强制门户 DNS 服务（所有域名解析到 192.168.4.1）
+│   ├── lcd_st7789.h        # ST7789 LCD 驱动接口
+│   ├── lcd_st7789.c        # 1.69 寸 ST7789 SPI 驱动 + 背光 + 蜘蛛图片
+│   └── spider_image.h      # 240×280 单色蜘蛛位图数组
 ├── dependencies.lock       # 组件管理器生成的依赖锁文件
 ├── managed_components/     # 组件管理器下载的 esp32-camera 等组件
 ├── build.ps1               # 本机 ESP-IDF 环境辅助脚本（编译/烧录/监视）

@@ -12,6 +12,7 @@
  *   - Wi-Fi AP + HTTP server     -> first-time provisioning via browser
  *   - Wi-Fi STA + NVS memory     -> auto reconnect to saved AP after power cycle
  *   - OV2640 camera              -> MJPEG stream / JPEG snapshot in browser
+ *   - ST7789 1.69" LCD           -> 240x280 SPI test pattern on boot
  *
  * GPIO0 is an RTC GPIO, so it can be used as an EXT0 wake-up source while
  * the chip is in deep sleep.
@@ -51,6 +52,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "dns_server.h"
+#include "lcd_st7789.h"
 
 #define USER_LED_PIN       GPIO_NUM_21
 #define BOOT_KEY_PIN       GPIO_NUM_0
@@ -131,6 +133,7 @@ typedef struct {
     char sta_ip[16];
     bool led_on;
     bool camera_ready;
+    bool lcd_ready;
     bool wifi_configured;
     bool sta_connected;
     int prov_state;
@@ -386,8 +389,9 @@ static void power_off(void)
 {
     status_log("[power] BOOT pressed -> entering deep sleep\n");
 
-    /* Turn the LED off before sleeping. */
+    /* Turn the LED and LCD off before sleeping. */
     gpio_set_level(USER_LED_PIN, 1);
+    lcd_st7789_sleep();
 
     /* Wake up when BOOT is pressed (line goes low). */
     ESP_ERROR_CHECK(esp_sleep_enable_ext0_wakeup(BOOT_KEY_PIN, KEY_ACTIVE_LEVEL));
@@ -1213,6 +1217,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                        "STA 热点      : %s\n"
                        "STA IP        : %s\n"
                        "摄像头        : %s\n"
+                       "LCD 屏幕      : %s (ST7789 240x280)\n"
                        "画面尺寸      : %ux%u\n"
                        "已采集帧数    : %lu\n"
                        "抓拍失败次数  : %lu\n"
@@ -1235,6 +1240,7 @@ static esp_err_t status_get_handler(httpd_req_t *req)
                        status.sta_ssid[0] != '\0' ? status.sta_ssid : "未配置",
                        status.sta_ip[0] != '\0' ? status.sta_ip : "等待分配",
                        status.camera_ready ? "就绪" : "不可用",
+                       status.lcd_ready ? "就绪" : "不可用",
                        (unsigned int)status.camera_width,
                        (unsigned int)status.camera_height,
                        (unsigned long)status.camera_frames,
@@ -1541,6 +1547,19 @@ void app_main(void)
 
     boot_key_init();
     camera_init();
+
+    esp_err_t lcd_err = lcd_st7789_init();
+    if (lcd_err == ESP_OK) {
+        if (s_status_mutex != NULL && xSemaphoreTake(s_status_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            s_status.lcd_ready = true;
+            xSemaphoreGive(s_status_mutex);
+        } else {
+            s_status.lcd_ready = true;
+        }
+        status_log("[lcd] ST7789 初始化成功，已显示蜘蛛图片\n");
+    } else {
+        status_log("[lcd] ST7789 初始化失败: %s\n", esp_err_to_name(lcd_err));
+    }
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
