@@ -11,3 +11,13 @@ CONFIG_SPIRAM_SPEED_80M=y
 
 # Print console over the native USB port (USB-C connector on XIAO)
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Wi-Fi AP + STA for the photo upload web page
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+
+# HTTP + DNS captive portal need a few extra sockets
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Use the maintained software JPEG decoder (ROM version lacks compatibility fixes)
+CONFIG_JD_USE_ROM=n

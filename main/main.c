@@ -10,6 +10,7 @@
  *   - Power on / reset          -> LED blinks at 1 Hz, LCD shows image
  *   - Short press of BOOT       -> enter deep sleep (LED/LCD off)
  *   - Short press of BOOT again -> wake from deep sleep and resume
+ *   - Web UI                    -> upload a photo over Wi-Fi, display it on LCD
  */
 #include <stdio.h>
 
@@ -20,7 +21,13 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "nvs_flash.h"
 #include "lcd_st7789.h"
+#include "photo_display.h"
+#include "photo_httpd.h"
+#include "photo_wifi.h"
 
 #define USER_LED_PIN       GPIO_NUM_21
 #define BOOT_KEY_PIN       GPIO_NUM_0
@@ -110,6 +117,20 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "LCD init failed: %s", esp_err_to_name(lcd_err));
     }
+
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES ||
+        nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs_err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(nvs_err);
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    ESP_ERROR_CHECK(photo_display_init());
+    ESP_ERROR_CHECK(photo_wifi_init());
+    ESP_ERROR_CHECK(photo_httpd_start());
 
     xTaskCreate(led_task, "led", 2048, NULL, 5, NULL);
     xTaskCreate(power_key_task, "power_key", 2048, NULL, 5, NULL);

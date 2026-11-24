@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenGlass 照片上传</title>
+<style>
+  :root{color-scheme:dark;--bg:#0e1117;--card:#181d27;--line:#2a3242;--fg:#e8edf5;--dim:#9aa7bb;--accent:#55d6be}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  main{max-width:640px;margin:0 auto;padding:24px 18px 48px}
+  h1{font-size:21px;margin:0 0 4px}
+  .sub,.hint,.status{color:var(--dim);font-size:13px}
+  .sub{margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:26px 14px;text-align:center;cursor:pointer;transition:.2s}
+  .drop.over{border-color:var(--accent);background:#1b2a2a}
+  .icon{font-size:30px;color:var(--accent);line-height:1}
+  .row{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+  canvas{width:120px;height:140px;background:#000;border:1px solid var(--line);border-radius:8px;image-rendering:auto}
+  .info{flex:1;min-width:160px;font-size:13px;color:var(--dim)}
+  .info b{color:var(--fg);font-weight:600}
+  button{width:100%;padding:12px;border:0;border-radius:10px;background:var(--accent);color:#06231e;font-size:15px;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .small{padding:9px;font-size:14px;background:#283244;color:var(--fg)}
+  .msg{min-height:22px;font-size:13px;color:var(--accent);word-break:break-all}
+  .msg.bad{color:#ff8b8b}
+  details{margin-top:18px}
+  summary{cursor:pointer;color:var(--dim);font-size:14px}
+  input{width:100%;padding:10px;margin:8px 0;border:1px solid var(--line);border-radius:8px;background:#0e131c;color:var(--fg)}
+  label{font-size:13px;color:var(--dim)}
+</style>
+</head>
+<body>
+<main>
+  <h1>OpenGlass 照片上传</h1>
+  <p class="sub">照片在浏览器中自动等比压缩到 240×280，再传到设备屏幕显示。原图可以是任意尺寸。</p>
+
+  <div class="card">
+    <div class="drop" id="drop">
+      <div class="icon">＋</div>
+      <div>点击选择照片，或拖拽到此处</div>
+      <div class="hint">支持浏览器可识别的 JPG / PNG / WebP 等格式</div>
+      <input type="file" id="file" accept="image/*" hidden>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <canvas id="preview" width="240" height="280"></canvas>
+      <div class="info" id="detail">等待选择照片…<br>压缩后 JPEG 通常小于 60 KB，设备无需处理超大原图。</div>
+    </div>
+  </div>
+
+  <button id="upload" disabled>上传并显示在屏幕上</button>
+  <p class="msg" id="msg"></p>
+  <p class="status" id="status">正在读取设备状态…</p>
+
+  <details>
+    <summary>Wi-Fi 设置（可选，保存后设备会尝试连接你的路由器）</summary>
+    <label for="ssid">SSID</label>
+    <input id="ssid" autocomplete="off" placeholder="路由器名称">
+    <label for="pass">密码</label>
+    <input id="pass" type="password" autocomplete="off" placeholder="留空表示开放网络">
+    <button class="small" id="wifisave">保存并连接</button>
+  </details>
+</main>
+
+<script>
+const MAX_W = 240, MAX_H = 280;
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const preview = document.getElementById('preview');
+const detail = document.getElementById('detail');
+const uploadBtn = document.getElementById('upload');
+const msg = document.getElementById('msg');
+let prepared = null;
+
+function say(text, bad) {
+  msg.textContent = text;
+  msg.className = bad ? 'msg bad' : 'msg';
+}
+
+function fmt(bytes) {
+  return bytes < 1024 ? bytes + ' B' : (bytes / 1024).toFixed(1) + ' KB';
+}
+
+function loadBitmap(file) {
+  if (window.createImageBitmap) {
+    return createImageBitmap(file).catch(() => fallback(file));
+  }
+  return fallback(file);
+}
+
+function fallback(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { img._url = url; resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('浏览器无法解码该图片')); };
+    img.src = url;
+  });
+}
+
+async function prepare(file) {
+  const bmp = await loadBitmap(file);
+  const iw = bmp.width || bmp.naturalWidth;
+  const ih = bmp.height || bmp.naturalHeight;
+  if (!iw || !ih) throw new Error('图片尺寸无效');
+
+  const scale = Math.min(MAX_W / iw, MAX_H / ih);
+  const w = Math.max(1, Math.round(iw * scale));
+  const h = Math.max(1, Math.round(ih * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = MAX_W;
+  canvas.height = MAX_H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, MAX_W, MAX_H);
+  ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, (MAX_W - w) / 2, (MAX_H - h) / 2, w, h);
+
+  if (bmp.close) bmp.close();
+  if (bmp._url) URL.revokeObjectURL(bmp._url);
+
+  /* Convert the already screen-sized canvas straight to big-endian RGB565.
+   * No JPEG on the wire, so no decoder artifacts on the device. */
+  const rgba = ctx.getImageData(0, 0, MAX_W, MAX_H).data;
+  const pixels = new Uint8Array(MAX_W * MAX_H * 2);
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 2) {
+    const r = rgba[i] >> 3;
+    const g = rgba[i + 1] >> 2;
+    const b = rgba[i + 2] >> 3;
+    const rgb565 = (r << 11) | (g << 5) | b;
+    pixels[j] = rgb565 >> 8;
+    pixels[j + 1] = rgb565 & 0xFF;
+  }
+  const blob = new Blob([pixels], { type: 'application/octet-stream' });
+
+  preview.getContext('2d').drawImage(canvas, 0, 0);
+  detail.innerHTML = '原图 <b>' + iw + '×' + ih + '</b> / ' + fmt(file.size) +
+    '<br>屏幕显示 <b>' + w + '×' + h + '</b>（等比居中，黑边填充）' +
+    '<br>上传数据 <b>' + fmt(blob.size) + '</b> RGB565（' + MAX_W + '×' + MAX_H + '）';
+  say('已就绪，点击上传即可显示。');
+  return { blob: blob, w: w, h: h, iw: iw, ih: ih, orig: file.size };
+}
+
+async function pick(file) {
+  if (!file) return;
+  uploadBtn.disabled = true;
+  prepared = null;
+  say('正在压缩…');
+  try {
+    prepared = await prepare(file);
+    uploadBtn.disabled = false;
+  } catch (e) {
+    say('处理失败：' + e.message, true);
+  }
+}
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => pick(fileInput.files[0]));
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  pick(e.dataTransfer.files[0]);
+});
+
+uploadBtn.addEventListener('click', async () => {
+  if (!prepared) return;
+  uploadBtn.disabled = true;
+  say('上传中…');
+  try {
+    const res = await fetch('/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: prepared.blob
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text);
+    say('完成：' + prepared.iw + '×' + prepared.ih + ' → 屏幕 ' + prepared.w + '×' + prepared.h + '，' + fmt(prepared.blob.size));
+  } catch (e) {
+    say('上传失败：' + e.message, true);
+  } finally {
+    uploadBtn.disabled = false;
+  }
+});
+
+document.getElementById('wifisave').addEventListener('click', async () => {
+  const body = new URLSearchParams({
+    ssid: document.getElementById('ssid').value.trim(),
+    password: document.getElementById('pass').value
+  });
+  say('保存 Wi-Fi 配置…');
+  try {
+    const res = await fetch('/wifi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    });
+    const text = await res.text();
+    say(text || (res.ok ? 'Wi-Fi 配置已保存' : '保存失败'), !res.ok);
+  } catch (e) {
+    say('保存失败：' + e.message, true);
+  }
+});
+
+async function refresh() {
+  try {
+    const res = await fetch('/status');
+    const s = await res.json();
+    document.getElementById('status').textContent =
+      '模式 ' + s.mode + ' · 访问 IP ' + s.ip + ' · STA ' + s.sta + ' · 最近照片 ' + s.last;
+  } catch (e) {}
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

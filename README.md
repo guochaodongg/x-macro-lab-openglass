@@ -1,6 +1,6 @@
 # XIAO ESP32S3 LED/BOOT/ST7789 LCD Demo（ESP-IDF v6.1）
 
-精简版固件：只保留板载 LED 闪烁、BOOT 键深度睡眠开关机，以及 1.69 寸 ST7789 LCD 蜘蛛图片显示。已移除 Wi‑Fi 配网、网页服务、摄像头、强制门户等功能。
+在 LED / BOOT 开关机 / ST7789 显示的基础上，新增通过 IP 网页上传照片并自动压缩适配屏幕的功能。
 
 ## 功能
 
@@ -8,6 +8,30 @@
 - LCD 上电显示蜘蛛图片
 - 短按 BOOT 键进入深度睡眠，LED 和 LCD 背光关闭
 - 再按 BOOT 键从深度睡眠唤醒，恢复 LED 闪烁和 LCD 显示
+- 手机/电脑浏览器打开设备 IP，选择任意尺寸照片，浏览器自动等比压缩到 240×280 后上传
+- 设备解码 JPEG 并按屏幕比例居中显示，超出部分用黑边填充
+- 可选把设备加入自有 Wi‑Fi（AP+STA），保存凭据后自动重连
+
+## 网页上传照片
+
+1. 手机或电脑连接 Wi‑Fi：`OpenGlass-Photo`，密码 `openglass123`
+2. 浏览器打开 `http://192.168.4.1/`（连接设备到路由器后，也可用状态页显示的 STA IP 访问）
+3. 点击或拖拽照片，页面会用 Canvas 按 240×280 等比缩放并导出 JPEG，再上传到设备
+4. 上传完成后照片立即显示在屏幕上；`GET /photo` 可查看设备当前保存的照片
+
+浏览器端压缩保证原图无论多大（几十 MP 也可以）都不会占用设备内存，设备只接收压缩后的小 JPEG。若从脚本直接上传原始 JPEG，设备端也会按 1/2、1/4、1/8 缩放解码后再适配屏幕，单次上传上限 2 MB。
+
+页面底部的 Wi‑Fi 设置可保存路由器 SSID/密码；保存后设备以 AP+STA 模式工作，两个 IP 都能打开网页。AP 始终保留，避免路由器不可用时无法访问设备。
+
+### HTTP 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/` | 上传页面 |
+| POST | `/upload` | `image/jpeg` 原始请求体，解码并显示 |
+| GET | `/status` | JSON 状态（模式、IP、最近照片、空闲堆） |
+| GET | `/photo` | 返回最近一次上传的 JPEG |
+| POST | `/wifi` | `ssid=...&password=...` 保存并连接路由器 |
 
 ## 硬件
 
@@ -51,10 +75,15 @@ LCD 参数在 `main/lcd_st7789.c` 顶部：
 .
 ├── main/
 │   ├── CMakeLists.txt
-│   ├── main.c              # LED 闪烁 + BOOT 深度睡眠
-│   ├── lcd_st7789.h        # ST7789 LCD 驱动接口
-│   ├── lcd_st7789.c        # ST7789 SPI 初始化 + 背光 + 图片显示
-│   └── spider_image.h      # 240×280 单色蜘蛛位图
+│   ├── idf_component.yml   # esp_jpeg 依赖
+│   ├── main.c              # LED、BOOT 深度睡眠与功能初始化
+│   ├── lcd_st7789.h/.c     # ST7789 驱动 + 通用 RGB565 绘制
+│   ├── spider_image.h      # 240×280 单色蜘蛛位图
+│   ├── photo_wifi.h/.c     # AP+STA、凭据保存、强制门户 DNS
+│   ├── photo_httpd.h/.c    # 上传页面与 HTTP 接口
+│   ├── photo_display.h/.c  # JPEG 解码、缩放居中与显示
+│   ├── dns_server.h/.c     # SoftAP DNS 重定向
+│   └── web/upload.html     # 浏览器端压缩上传页面
 ├── build.ps1               # 本机 ESP-IDF 构建脚本
 ├── flash.bat               # 使用 firmware.factory.bin 烧录
 ├── firmware.factory.bin    # 一体式固件
