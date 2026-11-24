@@ -1,11 +1,11 @@
 # XIAO ESP32S3 LED/BOOT/ST7789 LCD Demo（ESP-IDF v6.1）
 
-精简版固件：只保留板载 LED 闪烁、BOOT 键深度睡眠开关机，以及 1.69 寸 ST7789 LCD 蜘蛛图片显示。已移除 Wi‑Fi 配网、网页服务、摄像头、强制门户等功能。
+精简版固件：只保留板载 LED 闪烁、BOOT 键深度睡眠开关机，以及 1.69 寸 ST7789 LCD 的 12 张万圣节图标轮播。已移除 Wi‑Fi 配网、网页服务、摄像头、强制门户等功能。
 
 ## 功能
 
 - 上电后板载 LED 以 1 Hz 闪烁
-- LCD 上电显示蜘蛛图片
+- LCD 上电显示 12 张万圣节图标，每 2 秒切换一张
 - 短按 BOOT 键进入深度睡眠，LED 和 LCD 背光关闭
 - 再按 BOOT 键从深度睡眠唤醒，恢复 LED 闪烁和 LCD 显示
 
@@ -42,8 +42,9 @@ LCD 参数在 `main/lcd_st7789.c` 顶部：
 - Y 偏移 20
 - 颜色反转
 - BGR
-- 图片为白底黑蜘蛛单色位图，灰底水印已过滤
-- 图片按原比例居中显示
+- 12 张图标从源图 4×3 网格等大小裁剪，缩放为 240×240
+- 图片以 16 色索引位图保存，循环轮播间隔 2 秒
+- 图片在 240×280 屏幕中居中显示
 
 ## 目录结构
 
@@ -53,8 +54,8 @@ LCD 参数在 `main/lcd_st7789.c` 顶部：
 │   ├── CMakeLists.txt
 │   ├── main.c              # LED 闪烁 + BOOT 深度睡眠
 │   ├── lcd_st7789.h        # ST7789 LCD 驱动接口
-│   ├── lcd_st7789.c        # ST7789 SPI 初始化 + 背光 + 图片显示
-│   └── spider_image.h      # 240×280 单色蜘蛛位图
+│   ├── lcd_st7789.c        # ST7789 SPI 初始化 + 背光 + 12 张图标轮播
+│   └── halloween_images.h  # 12 张 240×240 16 色索引图标数据
 ├── build.ps1               # 本机 ESP-IDF 构建脚本
 ├── flash.bat               # 使用 firmware.factory.bin 烧录
 ├── firmware.factory.bin    # 一体式固件

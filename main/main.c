@@ -4,7 +4,7 @@
  * Hardware:
  *   - User LED : GPIO21, ORANGE, ACTIVE LOW (0 = on, 1 = off)
  *   - BOOT key : GPIO0,  ACTIVE LOW, RTC GPIO, EXT0 wake source
- *   - LCD      : ST7789 1.69" 240x280 SPI, shows a spider image on boot
+ *   - LCD      : ST7789 1.69" 240x280 SPI, 12-frame Halloween carousel
  *
  * Behaviour:
  *   - Power on / reset          -> LED blinks at 1 Hz, LCD shows image
@@ -106,7 +106,7 @@ void app_main(void)
 
     esp_err_t lcd_err = lcd_st7789_init();
     if (lcd_err == ESP_OK) {
-        ESP_LOGI(TAG, "LCD ready");
+        ESP_LOGI(TAG, "LCD ready, carousel running");
     } else {
         ESP_LOGE(TAG, "LCD init failed: %s", esp_err_to_name(lcd_err));
     }

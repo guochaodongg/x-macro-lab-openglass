@@ -1,6 +1,7 @@
 #include "lcd_st7789.h"
 
-#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -10,7 +11,7 @@
 #include "esp_lcd_io_spi.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_st7789.h"
-#include "spider_image.h"
+#include "halloween_images.h"
 
 /* XIAO ESP32S3 D8/D9/D10 are the default SPI pins; D6/D7/D0/D1 avoid camera pins. */
 #define LCD_SPI_HOST        SPI2_HOST
@@ -25,58 +26,70 @@
 #define LCD_HEIGHT          280
 #define LCD_X_OFFSET        0
 #define LCD_Y_OFFSET        20
+#define LCD_IMAGE_Y_OFFSET  20
 #define LCD_PIXEL_CLOCK_HZ  20000000
 #define LCD_SPI_MODE        3
 #define LCD_INVERT_COLOR    true
 #define LCD_RGB_ORDER       LCD_RGB_ELEMENT_ORDER_BGR
+#define LCD_CAROUSEL_PERIOD_MS 2000
 
 #define LCD_BLK_TIMER       LEDC_TIMER_1
 #define LCD_BLK_CHANNEL     LEDC_CHANNEL_1
 #define LCD_BLK_DUTY_FULL   1023
 
-#define LCD_BAR_HEIGHT      32
-
-#define COLOR_BLACK         0x0000
-#define COLOR_WHITE         0xFFFF
+#define LCD_DMA_CHUNK_HEIGHT 32
 
 static const char *TAG = "lcd_st7789";
 
 static esp_lcd_panel_io_handle_t s_lcd_io = NULL;
 static esp_lcd_panel_handle_t s_lcd_panel = NULL;
+static uint8_t *s_frame_buffer = NULL;
+static int s_current_frame = 0;
 static bool s_lcd_initialized = false;
 
-static esp_err_t draw_spider_image(void)
+static inline void put_color(uint8_t *buf, int index, uint16_t color)
 {
-    const size_t row_bytes = SPIDER_IMAGE_WIDTH / 8;
-    const size_t chunk_pixels = (size_t)SPIDER_IMAGE_WIDTH * LCD_BAR_HEIGHT;
-    uint8_t *line = heap_caps_malloc(chunk_pixels * 2, MALLOC_CAP_DMA);
-    if (line == NULL) {
-        return ESP_ERR_NO_MEM;
+    buf[index * 2 + 0] = (uint8_t)(color >> 8);
+    buf[index * 2 + 1] = (uint8_t)(color & 0xFF);
+}
+
+static esp_err_t draw_frame(int frame)
+{
+    if (s_lcd_panel == NULL || s_frame_buffer == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (frame < 0 || frame >= HALLOWEEN_FRAME_COUNT) {
+        return ESP_ERR_INVALID_ARG;
     }
 
-    esp_err_t err = ESP_OK;
-    for (int y0 = 0; y0 < LCD_HEIGHT && err == ESP_OK; y0 += LCD_BAR_HEIGHT) {
-        int h = LCD_BAR_HEIGHT;
-        if (y0 + h > LCD_HEIGHT) {
-            h = LCD_HEIGHT - y0;
-        }
+    const uint16_t bg_color = halloween_palette[0];
+    const uint8_t *image = halloween_frames[frame];
 
-        memset(line, 0xFF, chunk_pixels * 2);
-        for (int y = y0; y < y0 + h; y++) {
-            for (int x = 0; x < SPIDER_IMAGE_WIDTH; x++) {
-                uint8_t byte = spider_image_bits[(size_t)y * row_bytes + (x >> 3)];
-                uint16_t color = (byte & (0x80 >> (x & 7))) ? COLOR_BLACK : COLOR_WHITE;
-                uint8_t *p = &line[((y - y0) * SPIDER_IMAGE_WIDTH + x) * 2];
-                p[0] = (uint8_t)(color >> 8);
-                p[1] = (uint8_t)(color & 0xFF);
+    for (int y = 0; y < LCD_HEIGHT; y++) {
+        int img_y = y - LCD_IMAGE_Y_OFFSET;
+        for (int x = 0; x < HALLOWEEN_FRAME_WIDTH; x++) {
+            uint16_t color = bg_color;
+            if (img_y >= 0 && img_y < HALLOWEEN_FRAME_HEIGHT) {
+                uint8_t packed = image[img_y * (HALLOWEEN_FRAME_WIDTH / 2) + (x >> 1)];
+                int idx = (x & 1) ? (packed & 0x0F) : (packed >> 4);
+                color = halloween_palette[idx];
             }
+            put_color(s_frame_buffer, y * HALLOWEEN_FRAME_WIDTH + x, color);
         }
-
-        err = esp_lcd_panel_draw_bitmap(s_lcd_panel, 0, y0, SPIDER_IMAGE_WIDTH, y0 + h, line);
     }
 
-    heap_caps_free(line);
-    return err;
+    return esp_lcd_panel_draw_bitmap(s_lcd_panel, 0, 0,
+                                     HALLOWEEN_FRAME_WIDTH, LCD_HEIGHT,
+                                     s_frame_buffer);
+}
+
+static void carousel_task(void *arg)
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(LCD_CAROUSEL_PERIOD_MS));
+        s_current_frame = (s_current_frame + 1) % HALLOWEEN_FRAME_COUNT;
+        draw_frame(s_current_frame);
+    }
 }
 
 esp_err_t lcd_st7789_set_backlight(bool on)
@@ -107,13 +120,23 @@ esp_err_t lcd_st7789_init(void)
 {
     esp_err_t err;
 
+    const size_t frame_size = (size_t)LCD_WIDTH * LCD_HEIGHT * 2;
+    s_frame_buffer = heap_caps_malloc(frame_size, MALLOC_CAP_DMA);
+    if (s_frame_buffer == NULL) {
+        s_frame_buffer = heap_caps_malloc(frame_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (s_frame_buffer == NULL) {
+        ESP_LOGE(TAG, "alloc frame buffer failed");
+        return ESP_ERR_NO_MEM;
+    }
+
     spi_bus_config_t bus_config = {
         .sclk_io_num = LCD_PIN_SCLK,
         .mosi_io_num = LCD_PIN_MOSI,
         .miso_io_num = -1,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = LCD_WIDTH * LCD_BAR_HEIGHT * 2,
+        .max_transfer_sz = LCD_WIDTH * LCD_DMA_CHUNK_HEIGHT * 2,
     };
     err = spi_bus_initialize(LCD_SPI_HOST, &bus_config, SPI_DMA_CH_AUTO);
     if (err != ESP_OK) {
@@ -191,9 +214,9 @@ esp_err_t lcd_st7789_init(void)
         return err;
     }
 
-    err = draw_spider_image();
+    err = draw_frame(s_current_frame);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "draw_spider_image failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "draw_frame failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -208,7 +231,9 @@ esp_err_t lcd_st7789_init(void)
         return err;
     }
 
-    ESP_LOGI(TAG, "ST7789 ready: %dx%d, SPI%d, %u Hz, y_offset=%d",
-             LCD_WIDTH, LCD_HEIGHT, LCD_SPI_MODE, LCD_PIXEL_CLOCK_HZ, LCD_Y_OFFSET);
+    xTaskCreate(carousel_task, "lcd_carousel", 2048, NULL, 5, NULL);
+
+    ESP_LOGI(TAG, "ST7789 ready: %dx%d, %d frames, %u ms interval",
+             LCD_WIDTH, LCD_HEIGHT, HALLOWEEN_FRAME_COUNT, LCD_CAROUSEL_PERIOD_MS);
     return ESP_OK;
 }
